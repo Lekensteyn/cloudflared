@@ -90,6 +90,33 @@ func serveStream(logger *logrus.Logger, originURL string, conn io.ReadWriter, he
 	return nil
 }
 
+// XXX quick hack to enable ESNI support and avoid leaking the host name through
+// DNS.
+func websocketClientConnect(req *http.Request) (*websocket.Conn, *http.Response, error) {
+	tlsClientConfig, ipAddr, err := createTLSClientConfig(req.URL.Hostname())
+	if err != nil {
+		return nil, nil, err
+	}
+	enableKeyLog(tlsClientConfig)
+
+	// XXX quick hack to avoid a plaintext DNS query over UDP, done by
+	// replacing the hostname by an IP.
+	origHost := req.URL.Host
+	_, port, err := net.SplitHostPort(req.URL.Host)
+	if err != nil {
+		origHost = req.URL.Host
+		port = "443"
+	}
+	req.URL.Host = ipAddr + ":" + port
+
+	wsConn, resp, err := websocket.ClientConnect(req, tlsClientConfig)
+	req.URL.Host = origHost
+	if err != nil {
+		return nil, nil, err
+	}
+	return &websocket.Conn{Conn: wsConn}, resp, nil
+}
+
 // createWebsocketStream will create a WebSocket connection to stream data over
 // It also handles redirects from Access and will present that flow if
 // the token is not present on the request
@@ -100,7 +127,7 @@ func createWebsocketStream(originURL string, headers http.Header) (*websocket.Co
 	}
 	req.Header = headers
 
-	wsConn, resp, err := websocket.ClientConnect(req, nil)
+	wsConn, resp, err := websocketClientConnect(req)
 	if err != nil && resp != nil && resp.StatusCode > 300 {
 		location, err := resp.Location()
 		if err != nil {
@@ -114,7 +141,7 @@ func createWebsocketStream(originURL string, headers http.Header) (*websocket.Co
 			return nil, err
 		}
 
-		wsConn, _, err = websocket.ClientConnect(req, nil)
+		wsConn, _, err = websocketClientConnect(req)
 		if err != nil {
 			return nil, err
 		}
@@ -122,7 +149,7 @@ func createWebsocketStream(originURL string, headers http.Header) (*websocket.Co
 		return nil, err
 	}
 
-	return &websocket.Conn{Conn: wsConn}, nil
+	return wsConn, nil
 }
 
 // buildAccessRequest builds an HTTP request with the Access token set
