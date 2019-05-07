@@ -112,7 +112,7 @@ func websocketClientConnect(req *http.Request) (*websocket.Conn, *http.Response,
 	wsConn, resp, err := websocket.ClientConnect(req, tlsClientConfig)
 	req.URL.Host = origHost
 	if err != nil {
-		return nil, nil, err
+		return nil, resp, err
 	}
 	return &websocket.Conn{Conn: wsConn}, resp, nil
 }
